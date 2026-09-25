@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# 运行时数据（不入库）
+data/memory.db
+data/memory.db-*
+data/chroma/
+data/logs/
+*.log
+
+# 密钥（只提交 .env.example）
+.env
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

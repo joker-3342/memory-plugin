@@ -1,0 +1,67 @@
+server:
+  port: 8000
+  host: "127.0.0.1"
+
+database:
+  path: "data/memory.db"
+
+memory:
+  total_budget: 1300
+  hard_limit: 1500
+  decay:
+    affection: {half_life: 200, floor: 0.0, refresh: 0.05}
+    trust: {half_life: 300, floor: 0.0, refresh: 0.03}
+    respect: {half_life: 500, floor: 0.1, refresh: 0.02}
+    fear: {half_life: 80, floor: 0.0, refresh: 0.08}
+    hostility: {half_life: 150, floor: 0.0, refresh: 0.06}
+    debt: {half_life: 9999, floor: 0.0, refresh: 0.0}
+  graph:
+    max_hops: 2
+    hop_weights: {1: 1.0, 2: 0.5}
+    max_nodes_per_hop: 5
+    allowed_edges: ["参与", "发生", "涉及", "推进", "持有"]
+    forbidden_edges: ["关系", "隶属"]
+  causal:
+    auto_commit_importance: 0.8
+    stale_turns: 20
+    discard_importance: 0.5
+
+vector:
+  provider: "chroma"
+  path: "data/chroma"
+  embedding_model: "text-embedding-3-small"
+  top_k: 3
+
+gateway:
+  enabled: true
+  api_key_env: "GATEWAY_API_KEY"
+  upstreams:
+    - name: "opencode-go"
+      base_url: "https://opencode.ai/zen/go/v1"
+      api_key_env: "OPENCODE_API_KEY"
+      headers:
+        x-opencode-session: "auto"
+    - name: "local-memory"
+      base_url: "http://localhost:8000/v1"
+  routes:
+    - match: {model_prefix: "memory-"}
+      upstream: "local-memory"
+    - match: {model_prefix: "gpt-"}
+      upstream: "opencode-go"
+
+llm:
+  summarizer:
+    model: "gpt-4o-mini"
+    endpoint: "http://localhost:8000/v1"
+  extractor:
+    model: "gpt-4o-mini"
+    endpoint: "http://localhost:8000/v1"
+
+# 日志：控制台 + 文件落盘（data/logs/memory-plugin.log、error.log）
+# 级别也可用环境变量 MEMORY_PLUGIN_LOG_LEVEL 覆盖；MEMORY_PLUGIN_LOG_JSON=1 强制控制台输出 JSON
+logging:
+  dir: "data/logs"
+  level: "INFO"
+  slow_ms: 200          # 超过这个毫秒数的操作打 warning（慢查询/慢注入）
+  max_bytes: 5242880    # 单文件 5MB
+  backup_count: 5       # 保留 5 份历史

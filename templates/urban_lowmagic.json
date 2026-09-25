@@ -1,0 +1,17 @@
+{
+  "id": "urban_lowmagic",
+  "name": "都市·低魔",
+  "world": {
+    "type": "小千世界",
+    "layer": 1,
+    "rules": {
+      "power_ceiling": "筑基",
+      "time_ratio": "1:1",
+      "death": "普通死亡",
+      "forbidden": ["金丹以上", "大规模暴露"],
+      "allowed": ["练气", "筑基", "符箓", "阵法"]
+    }
+  },
+  "locations": ["旧城区", "第七研究所", "夜市"],
+  "sample_chars": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "xianxia_small",
+  "name": "仙侠·小千世界",
+  "world": {
+    "type": "小千世界",
+    "layer": 1,
+    "rules": {
+      "power_ceiling": "金丹",
+      "time_ratio": "外界1日=此界30日",
+      "death": "魂魄入轮回",
+      "forbidden": ["仙帝", "大罗", "主神空间", "轮回者"],
+      "allowed": ["练气", "筑基", "金丹", "御剑", "宗门", "凡俗王朝"]
+    }
+  },
+  "locations": ["旧港酒馆", "钟楼", "公爵府", "青云宗"],
+  "sample_chars": []
+}

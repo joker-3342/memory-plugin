@@ -1,0 +1,41 @@
+/* 记忆插件 · 前端样式（最小化，不影响酒馆主题） */
+.memory-plugin-panel {
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.memory-plugin-panel .mp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.memory-plugin-panel .mp-row label {
+  min-width: 92px;
+}
+
+.memory-plugin-panel .mp-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 0.8em;
+  border: 1px solid currentColor;
+}
+
+.memory-plugin-panel .mp-badge.draft { color: #d08b1f; }
+.memory-plugin-panel .mp-badge.pending { color: #2f7fd0; }
+.memory-plugin-panel .mp-badge.committed { color: #2f9b52; }
+.memory-plugin-panel .mp-badge.revoked { color: #999; }
+
+.memory-plugin-panel .mp-warn { color: #c04a2f; }
+
+.memory-plugin-panel pre.mp-dump {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 6px;
+  border-radius: 4px;
+}

@@ -1,0 +1,14 @@
+# 记忆插件 · 后端依赖
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.6.0
+PyYAML>=6.0.1
+structlog>=24.1.0
+httpx>=0.27.0
+
+# 向量库（可选：未安装时自动降级为纯图检索 + 本地哈希嵌入）
+# chromadb>=0.4.24
+
+# 测试
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

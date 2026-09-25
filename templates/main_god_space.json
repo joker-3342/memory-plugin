@@ -1,0 +1,17 @@
+{
+  "id": "main_god_space",
+  "name": "无限流·主神空间",
+  "world": {
+    "type": "元世界",
+    "layer": 0,
+    "rules": {
+      "power_ceiling": "无上限",
+      "time_ratio": "暂停",
+      "death": "彻底抹除",
+      "forbidden": ["副本规则外能力"],
+      "allowed": ["轮回者", "任务结算", "强化"]
+    }
+  },
+  "locations": ["主神广场", "兑换终端", "副本入口"],
+  "sample_chars": []
+}
