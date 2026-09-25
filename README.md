@@ -1,5 +1,7 @@
 # 记忆插件 · Memory Engine
 
+**v2.1.0** · [更新日志](CHANGELOG.md) · [规格书](SPEC.md)
+
 为 SillyTavern 提供**独立后端记忆引擎**，解决长篇对话中的三大顽疾：
 
 | 问题 | 对策 |
@@ -44,7 +46,7 @@ cp -r memory-plugin/frontend/* "SillyTavern/data/<user>/extensions/memory-plugin
 状态栏显示绿点 + 后端版本：
 
 ```
-● 已连接 http://127.0.0.1:8080 · 后端 v2.0.0 · 向量 local-hash · 队列 pending=0/dead=0
+● 已连接 http://127.0.0.1:8080 · 后端 v2.1.0 · 向量 local-hash · 队列 pending=0/dead=0
 ```
 
 探测不到就显示红点并提示启动命令，此时插件降级运行（不注入，酒馆照常跑）。
@@ -379,12 +381,15 @@ pytest tests/test_causal.py -q # 只跑因果链
 
 ## 9. 已验证的运行时事实
 
-- 启动日志：`{"event":"startup","version":"2.0.0","vector":"local-hash"}` → `Application startup complete.`
+- 启动日志：`{"event":"startup","version":"2.1.0","vector":"local-hash"}` → `Application startup complete.`
 - 建表：27 张表（含索引）
 - `/inject` 实测输出：世界门禁 → 当前场景 → 人格锚点 → 锚点图记忆，`token_count=142`
 - `/update` 实测：入队 `["summarize","relation_update","event_extract"]`，后台线程消费 3 个任务全部 `done`
 - 因果草稿自动提取：从 AI 回复中抽出「艾琳被发现了，她决定独自行动」进入 draft 态
-- `pytest -q` → **52 passed**
+- `pytest -q` → **62 passed**（v2.1.0；v2.0.0 时为 52）
+- 日志落盘：`data/logs/memory-plugin.log` 每行一条 JSON；ERROR 另存 `error.log`（含 `traceback`）
+- 未捕获异常定位：故意传坏参数 → `error.log` 直接指到 `backend/api/admin.py:205` 的具体行号，响应体带同一个 `trace_id`
+- 前端自动连接：8000 被别的服务占用时正确跳过（不误连），命中 8080，`/inject` 返回 112 tokens
 
 ---
 

@@ -6,7 +6,7 @@
   "js": "frontend/index.js",
   "css": "frontend/style.css",
   "author": "joker-3342",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "homePage": "https://github.com/joker-3342/memory-plugin",
   "description": "长篇对话记忆引擎：世界门禁 / 人格锚点 / 因果链 / 关系衰减 / 向量检索。前端只做 UI 与转发，后端（backend/，FastAPI）做重活。"
 }
