@@ -14,6 +14,37 @@
 
 ## 1. 快速开始
 
+### 1.1 装到 SillyTavern（前端插件）
+
+**方式 A：URL 安装（推荐）**
+
+酒馆 → 扩展面板 → **Install extension** → 粘贴：
+
+```
+https://github.com/joker-3342/memory-plugin
+```
+
+仓库根目录的 `manifest.json` 会把酒馆指向 `frontend/`，装完重启酒馆即可。
+
+**方式 B：手动放**
+
+```bash
+# 克隆后，只把 frontend/ 的内容拷进扩展目录
+git clone https://github.com/joker-3342/memory-plugin.git
+mkdir -p "SillyTavern/data/<user>/extensions/memory-plugin"
+cp -r memory-plugin/frontend/* "SillyTavern/data/<user>/extensions/memory-plugin/"
+```
+
+> `frontend/` 里也带一份 `manifest.json`（js 指向同目录的 `index.js`），
+> 所以方式 B 直接可用；根目录那份是给方式 A 的，两者不冲突。
+
+装好后在「扩展」面板找到 **记忆插件 · Memory Engine**，把「后端地址」改成实际地址。
+
+### 1.2 启动后端（**必须**，否则插件只会降级不注入）
+
+前端插件只是 UI 与转发，**所有记忆逻辑都在后端**。后端没跑起来时，
+插件会自动降级为「只注入常驻核心」，并在酒馆里提示「后端无响应」。
+
 ```bash
 cd memory-plugin
 
@@ -30,17 +61,16 @@ uvicorn backend.main:app --host 127.0.0.1 --port 8000
 # 或： python -m backend.main
 ```
 
-自检：
+> 手机端（Termux/Operit）同样可跑：`pip install -r requirements.txt` 后
+> `python -m backend.main` 即可；插件默认连 `http://127.0.0.1:8000`，同机无需改地址。
+
+### 1.3 自检
 
 ```bash
 curl http://127.0.0.1:8000/health
 python -c "from backend.db import init_db; init_db()"   # 建表无报错
 pytest -q                                                # 全绿
 ```
-
-前端安装：把 `frontend/` 整个目录放进
-`SillyTavern/data/<user>/extensions/memory-plugin/`，重启酒馆后在
-「扩展」面板找到 **记忆插件 · Memory Engine**，把「后端地址」改成实际地址即可。
 
 ---
 
