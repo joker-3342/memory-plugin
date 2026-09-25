@@ -1,6 +1,6 @@
 # 记忆插件 · Memory Engine
 
-**v2.2.0** · [更新日志](CHANGELOG.md) · [规格书](SPEC.md) · [UI 定制](frontend/UI.md)
+**v2.3.0** · [更新日志](CHANGELOG.md) · [规格书](SPEC.md) · [UI 定制](frontend/UI.md)
 
 为 SillyTavern 提供**独立后端记忆引擎**，解决长篇对话中的三大顽疾：
 

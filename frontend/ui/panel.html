@@ -1,112 +1,132 @@
 <!--
-  记忆面板（SPEC 13.3）
+  记忆面板（SPEC 13.3）· 悬浮弹窗版
 
-  布局：左侧导航 + 右侧内容。
-  - 各页内容由 views.js 渲染进 #mp-content（总览/摘要/角色/关系/因果/世界/物品/目标）
-  - 设置页与调试页是静态 DOM，切换视图时显示/隐藏
+  结构：
+    #mp-fab      悬浮按钮（常驻屏幕右下，点开弹窗）
+    #mp-modal    悬浮弹窗（遮罩 + 面板；✕ / 点遮罩 / ESC 关闭）
+      └ 头部：品牌 + 状态 + 刷新/关闭
+      └ 主体：左侧导航 + 右侧内容（动态页 / 设置页 / 调试页）
+
+  为什么是弹窗：不挤在扩展设置的下拉框里，能占满屏幕看记忆。
 
   想自己改版：
-  1. 换肤 → 改 style.css 顶部的 CSS 变量（--mp-*）
-  2. 换结构 → 改这个文件的 .mp-nav / .mp-main
-  3. 换渲染 → 改 views.js 里的 renderXxx 函数
+  1. 换肤 → style.css 顶部 CSS 变量（--mp-*）
+  2. 换结构 → 改这里的 .mp-nav / .mp-main
+  3. 换渲染 → 改 views.js 里的 renderXxx
   详见 frontend/UI.md
 -->
 
-<div class="mp-app">
-  <nav class="mp-nav">
-    <div class="mp-brand">
-      <span class="mp-brand-mark">记</span>
-      <span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span>
-    </div>
+<!-- 悬浮按钮 -->
+<button id="mp-fab" class="mp-fab memory-plugin-panel" title="打开记忆引擎" aria-label="打开记忆引擎">
+  <span class="mp-fab-mark">记</span>
+</button>
 
-    <div class="mp-nav-group">记忆浏览</div>
-    <button class="mp-nav-item" data-view="overview">总览</button>
-    <button class="mp-nav-item" data-view="summaries">剧情摘要</button>
-    <button class="mp-nav-item" data-view="characters">角色档案</button>
-    <button class="mp-nav-item" data-view="relations">人际关系</button>
-    <button class="mp-nav-item" data-view="causal">因果链</button>
+<!-- 悬浮弹窗 -->
+<div id="mp-modal" class="mp-modal memory-plugin-panel" hidden>
+  <div class="mp-modal-mask" id="mp-modal-mask"></div>
 
-    <div class="mp-nav-group">世界</div>
-    <button class="mp-nav-item" data-view="world">世界设定</button>
-    <button class="mp-nav-item" data-view="items">物品追踪</button>
-    <button class="mp-nav-item" data-view="goals">目标与伏笔</button>
-
-    <div class="mp-nav-group">系统</div>
-    <button class="mp-nav-item" data-view="settings">设置</button>
-    <button class="mp-nav-item" data-view="debug">调试</button>
-  </nav>
-
-  <main class="mp-main">
-    <header class="mp-topbar">
-      <span class="mp-dot" id="mp-status-dot"></span>
-      <span class="mp-status-text" id="mp-status-text">记忆引擎初始化中…</span>
-      <button id="mp-refresh" class="menu_button mp-mini">刷新</button>
+  <div class="mp-modal-panel" role="dialog" aria-modal="true" aria-label="记忆引擎">
+    <header class="mp-modal-head">
+      <div class="mp-brand">
+        <span class="mp-brand-mark">记</span>
+        <span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span>
+      </div>
+      <div class="mp-modal-status">
+        <span class="mp-dot" id="mp-status-dot"></span>
+        <span class="mp-status-text" id="mp-status-text">记忆引擎初始化中…</span>
+      </div>
+      <div class="mp-modal-actions">
+        <button id="mp-refresh" class="menu_button mp-mini">刷新</button>
+        <button id="mp-close" class="mp-icon-btn" title="关闭" aria-label="关闭">✕</button>
+      </div>
     </header>
 
-    <div class="mp-content" id="mp-content">加载中……</div>
+    <div class="mp-modal-body">
+      <nav class="mp-nav">
+        <div class="mp-nav-group">记忆浏览</div>
+        <button class="mp-nav-item" data-view="overview">总览</button>
+        <button class="mp-nav-item" data-view="summaries">剧情摘要</button>
+        <button class="mp-nav-item" data-view="characters">角色档案</button>
+        <button class="mp-nav-item" data-view="relations">人际关系</button>
+        <button class="mp-nav-item" data-view="causal">因果链</button>
 
-    <!-- 设置页（静态） -->
-    <div class="mp-view" id="mp-view-settings" hidden>
-      <div class="mp-grid">
-        <label for="mp-world-id">世界 ID</label>
-        <input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
+        <div class="mp-nav-group">世界</div>
+        <button class="mp-nav-item" data-view="world">世界设定</button>
+        <button class="mp-nav-item" data-view="items">物品追踪</button>
+        <button class="mp-nav-item" data-view="goals">目标与伏笔</button>
 
-        <label for="mp-budget">token 预算</label>
-        <input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
-      </div>
+        <div class="mp-nav-group">系统</div>
+        <button class="mp-nav-item" data-view="settings">设置</button>
+        <button class="mp-nav-item" data-view="debug">调试</button>
+      </nav>
 
-      <div class="mp-row">
-        <label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label>
-      </div>
+      <div class="mp-main">
+        <div class="mp-content" id="mp-content">加载中……</div>
 
-      <div class="mp-row">
-        <button id="mp-save" class="menu_button">保存</button>
-        <button id="mp-init-world" class="menu_button">初始化世界</button>
-        <button id="mp-template" class="menu_button">应用模板</button>
-        <button id="mp-export" class="menu_button">导出世界</button>
-      </div>
+        <!-- 设置页（静态） -->
+        <div class="mp-view" id="mp-view-settings" hidden>
+          <div class="mp-grid">
+            <label for="mp-world-id">世界 ID</label>
+            <input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
 
-      <details class="mp-advanced">
-        <summary>高级</summary>
+            <label for="mp-budget">token 预算</label>
+            <input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
+          </div>
 
-        <div class="mp-grid">
-          <label for="mp-base-url">后端地址</label>
-          <input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
+          <div class="mp-row">
+            <label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label>
+          </div>
 
-          <label for="mp-inject-timeout">注入超时(ms)</label>
-          <input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
+          <div class="mp-row">
+            <button id="mp-save" class="menu_button">保存</button>
+            <button id="mp-init-world" class="menu_button">初始化世界</button>
+            <button id="mp-template" class="menu_button">应用模板</button>
+            <button id="mp-export" class="menu_button">导出世界</button>
+          </div>
 
-          <label for="mp-full-check">全量检查间隔</label>
-          <input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
+          <details class="mp-advanced">
+            <summary>高级</summary>
+
+            <div class="mp-grid">
+              <label for="mp-base-url">后端地址</label>
+              <input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
+
+              <label for="mp-inject-timeout">注入超时(ms)</label>
+              <input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
+
+              <label for="mp-full-check">全量检查间隔</label>
+              <input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
+            </div>
+
+            <div class="mp-row">
+              <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
+              <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试页</label>
+              <label class="mp-check"><input type="checkbox" id="mp-headless"> 隐藏悬浮按钮</label>
+            </div>
+
+            <div class="mp-row">
+              <button id="mp-reconnect" class="menu_button">重新连接</button>
+              <button id="mp-test" class="menu_button">测试连接</button>
+              <button id="mp-sync-entities" class="menu_button">同步实体表</button>
+            </div>
+
+            <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>
+          </details>
         </div>
 
-        <div class="mp-row">
-          <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
-          <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试页</label>
-          <label class="mp-check"><input type="checkbox" id="mp-headless"> 隐藏本面板</label>
+        <!-- 调试页（静态） -->
+        <div class="mp-view" id="mp-view-debug" hidden>
+          <div class="mp-row">
+            <button id="mp-refresh-debug" class="menu_button">注入详情</button>
+            <button id="mp-refresh-jobs" class="menu_button">队列</button>
+            <button id="mp-refresh-logs" class="menu_button">日志</button>
+            <button id="mp-refresh-errors" class="menu_button">错误日志</button>
+          </div>
+          <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
+          <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
+          <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>
         </div>
-
-        <div class="mp-row">
-          <button id="mp-reconnect" class="menu_button">重新连接</button>
-          <button id="mp-test" class="menu_button">测试连接</button>
-          <button id="mp-sync-entities" class="menu_button">同步实体表</button>
-        </div>
-
-        <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>
-      </details>
+      </div>
     </div>
-
-    <!-- 调试页（静态） -->
-    <div class="mp-view" id="mp-view-debug" hidden>
-      <div class="mp-row">
-        <button id="mp-refresh-debug" class="menu_button">注入详情</button>
-        <button id="mp-refresh-jobs" class="menu_button">队列</button>
-        <button id="mp-refresh-logs" class="menu_button">日志</button>
-        <button id="mp-refresh-errors" class="menu_button">错误日志</button>
-      </div>
-      <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
-      <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
-      <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>
-    </div>
-  </main>
+  </div>
 </div>

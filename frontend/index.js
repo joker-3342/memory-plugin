@@ -229,6 +229,8 @@ function renderStatus() {
   const dump = document.getElementById('mp-health-dump');
 
   if (dot) dot.className = `mp-dot ${conn.connected ? 'ok' : conn.checkedAt ? 'bad' : ''}`.trim();
+  // 悬浮按钮右下角的小状态点（绿=已连接）
+  document.getElementById('mp-fab')?.classList.toggle('is-ok', conn.connected);
   if (text) {
     if (conn.connected) {
       const h = conn.health || {};
@@ -429,73 +431,78 @@ async function loadTemplate(name) {
   return '';
 }
 
-const FALLBACK_HTML = `<div class="mp-app">
-  <nav class="mp-nav">
-    <div class="mp-brand"><span class="mp-brand-mark">记</span><span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span></div>
-    <div class="mp-nav-group">记忆浏览</div>
-    <button class="mp-nav-item" data-view="overview">总览</button>
-    <button class="mp-nav-item" data-view="summaries">剧情摘要</button>
-    <button class="mp-nav-item" data-view="characters">角色档案</button>
-    <button class="mp-nav-item" data-view="relations">人际关系</button>
-    <button class="mp-nav-item" data-view="causal">因果链</button>
-    <div class="mp-nav-group">世界</div>
-    <button class="mp-nav-item" data-view="world">世界设定</button>
-    <button class="mp-nav-item" data-view="items">物品追踪</button>
-    <button class="mp-nav-item" data-view="goals">目标与伏笔</button>
-    <div class="mp-nav-group">系统</div>
-    <button class="mp-nav-item" data-view="settings">设置</button>
-    <button class="mp-nav-item" data-view="debug">调试</button>
-  </nav>
-  <main class="mp-main">
-    <header class="mp-topbar">
-      <span class="mp-dot" id="mp-status-dot"></span>
-      <span class="mp-status-text" id="mp-status-text">记忆引擎初始化中…</span>
-      <button id="mp-refresh" class="menu_button mp-mini">刷新</button>
+const FALLBACK_HTML = `<button id="mp-fab" class="mp-fab memory-plugin-panel" title="打开记忆引擎"><span class="mp-fab-mark">记</span></button>
+<div id="mp-modal" class="mp-modal memory-plugin-panel" hidden>
+  <div class="mp-modal-mask" id="mp-modal-mask"></div>
+  <div class="mp-modal-panel">
+    <header class="mp-modal-head">
+      <div class="mp-brand"><span class="mp-brand-mark">记</span><span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span></div>
+      <div class="mp-modal-status"><span class="mp-dot" id="mp-status-dot"></span><span class="mp-status-text" id="mp-status-text">记忆引擎初始化中…</span></div>
+      <div class="mp-modal-actions"><button id="mp-refresh" class="menu_button mp-mini">刷新</button><button id="mp-close" class="mp-icon-btn" title="关闭">✕</button></div>
     </header>
-    <div class="mp-content" id="mp-content">加载中……</div>
-    <div class="mp-view" id="mp-view-settings" hidden>
-      <div class="mp-grid">
-        <label for="mp-world-id">世界 ID</label><input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
-        <label for="mp-budget">token 预算</label><input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
+    <div class="mp-modal-body">
+      <nav class="mp-nav">
+        <div class="mp-nav-group">记忆浏览</div>
+        <button class="mp-nav-item" data-view="overview">总览</button>
+        <button class="mp-nav-item" data-view="summaries">剧情摘要</button>
+        <button class="mp-nav-item" data-view="characters">角色档案</button>
+        <button class="mp-nav-item" data-view="relations">人际关系</button>
+        <button class="mp-nav-item" data-view="causal">因果链</button>
+        <div class="mp-nav-group">世界</div>
+        <button class="mp-nav-item" data-view="world">世界设定</button>
+        <button class="mp-nav-item" data-view="items">物品追踪</button>
+        <button class="mp-nav-item" data-view="goals">目标与伏笔</button>
+        <div class="mp-nav-group">系统</div>
+        <button class="mp-nav-item" data-view="settings">设置</button>
+        <button class="mp-nav-item" data-view="debug">调试</button>
+      </nav>
+      <div class="mp-main">
+        <div class="mp-content" id="mp-content">加载中……</div>
+        <div class="mp-view" id="mp-view-settings" hidden>
+          <div class="mp-grid">
+            <label for="mp-world-id">世界 ID</label><input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
+            <label for="mp-budget">token 预算</label><input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
+          </div>
+          <div class="mp-row"><label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label></div>
+          <div class="mp-row">
+            <button id="mp-save" class="menu_button">保存</button>
+            <button id="mp-init-world" class="menu_button">初始化世界</button>
+            <button id="mp-template" class="menu_button">应用模板</button>
+            <button id="mp-export" class="menu_button">导出世界</button>
+          </div>
+          <details class="mp-advanced"><summary>高级</summary>
+            <div class="mp-grid">
+              <label for="mp-base-url">后端地址</label><input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
+              <label for="mp-inject-timeout">注入超时(ms)</label><input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
+              <label for="mp-full-check">全量检查间隔</label><input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
+            </div>
+            <div class="mp-row">
+              <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
+              <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试页</label>
+              <label class="mp-check"><input type="checkbox" id="mp-headless"> 隐藏悬浮按钮</label>
+            </div>
+            <div class="mp-row">
+              <button id="mp-reconnect" class="menu_button">重新连接</button>
+              <button id="mp-test" class="menu_button">测试连接</button>
+              <button id="mp-sync-entities" class="menu_button">同步实体表</button>
+            </div>
+            <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>
+          </details>
+        </div>
+        <div class="mp-view" id="mp-view-debug" hidden>
+          <div class="mp-row">
+            <button id="mp-refresh-debug" class="menu_button">注入详情</button>
+            <button id="mp-refresh-jobs" class="menu_button">队列</button>
+            <button id="mp-refresh-logs" class="menu_button">日志</button>
+            <button id="mp-refresh-errors" class="menu_button">错误日志</button>
+          </div>
+          <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
+          <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
+          <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>
+        </div>
       </div>
-      <div class="mp-row"><label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label></div>
-      <div class="mp-row">
-        <button id="mp-save" class="menu_button">保存</button>
-        <button id="mp-init-world" class="menu_button">初始化世界</button>
-        <button id="mp-template" class="menu_button">应用模板</button>
-        <button id="mp-export" class="menu_button">导出世界</button>
-      </div>
-      <details class="mp-advanced"><summary>高级</summary>
-        <div class="mp-grid">
-          <label for="mp-base-url">后端地址</label><input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
-          <label for="mp-inject-timeout">注入超时(ms)</label><input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
-          <label for="mp-full-check">全量检查间隔</label><input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
-        </div>
-        <div class="mp-row">
-          <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
-          <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试页</label>
-          <label class="mp-check"><input type="checkbox" id="mp-headless"> 隐藏本面板</label>
-        </div>
-        <div class="mp-row">
-          <button id="mp-reconnect" class="menu_button">重新连接</button>
-          <button id="mp-test" class="menu_button">测试连接</button>
-          <button id="mp-sync-entities" class="menu_button">同步实体表</button>
-        </div>
-        <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>
-      </details>
     </div>
-    <div class="mp-view" id="mp-view-debug" hidden>
-      <div class="mp-row">
-        <button id="mp-refresh-debug" class="menu_button">注入详情</button>
-        <button id="mp-refresh-jobs" class="menu_button">队列</button>
-        <button id="mp-refresh-logs" class="menu_button">日志</button>
-        <button id="mp-refresh-errors" class="menu_button">错误日志</button>
-      </div>
-      <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
-      <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
-      <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>
-    </div>
-  </main>
+  </div>
 </div>`;
 
 function setValue(id, value) {
@@ -509,6 +516,32 @@ function setChecked(id, value) {
 function readInt(id, fallback) {
   const parsed = parseInt(document.getElementById(id)?.value, 10);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+// --------------------------------------------------------------- 弹窗开关
+
+function openPanel() {
+  const modal = document.getElementById('mp-modal');
+  if (modal) modal.hidden = false;
+  renderStatus();
+  if (state.snapshot) renderView();
+  else refreshSnapshot();
+}
+
+function closePanel() {
+  const modal = document.getElementById('mp-modal');
+  if (modal) modal.hidden = true;
+}
+
+/** 悬浮按钮 / 入口按钮 / ✕ / 遮罩 / ESC —— 都能开关弹窗。 */
+function bindModal() {
+  document.getElementById('mp-fab')?.addEventListener('click', openPanel);
+  document.getElementById('mp-open-panel')?.addEventListener('click', openPanel);
+  document.getElementById('mp-close')?.addEventListener('click', closePanel);
+  document.getElementById('mp-modal-mask')?.addEventListener('click', closePanel);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closePanel();
+  });
 }
 
 function bindPanel() {
@@ -546,6 +579,9 @@ function bindPanel() {
     syncSettings();
     persistSettings(s);
     applyDebugVisibility();
+    // headless：隐藏悬浮按钮 + 弹窗（入口按钮保留，刷新页面后彻底生效）
+    const mount = document.getElementById('memory-plugin-mount');
+    if (mount) mount.style.display = next.headless ? 'none' : '';
     if (next.autoConnect) await refreshHealth(true);
     await refreshSnapshot();
     renderStatus();
@@ -644,31 +680,41 @@ async function registerSettings() {
   configure({ ...DEFAULT_SETTINGS, ...extSettings(), ...(saved || {}) });
   syncSettings();
 
-  // headless：只注入、不显示面板（自己写 UI 时用）
+  // headless：只注入、不渲染任何 UI（自己写界面时用）
   if (extSettings().headless) {
-    console.info('[memory-plugin] headless 模式：不渲染面板，仅注入 + 后台同步');
+    console.info('[memory-plugin] headless 模式：不渲染 UI，仅注入 + 后台同步');
     return;
   }
 
-  const container = document.createElement('div');
-  container.id = 'memory-plugin-settings';
-  container.className = 'memory-plugin-panel';
-  container.innerHTML = `
+  // 1) 悬浮按钮 + 悬浮弹窗，直接挂到 body（不再塞进扩展设置的下拉框）
+  const mount = document.createElement('div');
+  mount.id = 'memory-plugin-mount';
+  mount.className = 'memory-plugin-panel';
+  mount.innerHTML = (await loadTemplate('panel.html')) || FALLBACK_HTML;
+  document.body.appendChild(mount);
+
+  // 2) 扩展设置里留一个入口（方便从设置进）
+  const entry = document.createElement('div');
+  entry.id = 'memory-plugin-entry';
+  entry.className = 'memory-plugin-panel';
+  entry.innerHTML = `
     <div class="inline-drawer">
       <div class="inline-drawer-toggle inline-drawer-header">
         <b>记忆引擎 · Memory Engine</b>
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
-      <div class="inline-drawer-content" id="mp-root"></div>
+      <div class="inline-drawer-content">
+        <div class="mp-row">
+          <button id="mp-open-panel" class="menu_button">打开记忆面板</button>
+          <span class="mp-dim">或点屏幕右下角的悬浮按钮</span>
+        </div>
+      </div>
     </div>`;
-
   const host = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
-  host?.appendChild(container);
+  host?.appendChild(entry);
 
-  const root = document.getElementById('mp-root');
-  const html = (await loadTemplate('panel.html')) || FALLBACK_HTML;
-  root.innerHTML = html;
-
+  // 3) 绑事件
+  bindModal();
   document.querySelectorAll('.mp-nav-item').forEach((el) => {
     el.addEventListener('click', () => switchView(el.dataset.view));
   });

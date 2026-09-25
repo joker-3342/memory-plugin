@@ -395,18 +395,134 @@
 
 .memory-plugin-panel .mp-mini { font-size: 0.82em; padding: 2px 8px; }
 
-/* 窄屏：导航收成横排 */
-@media (max-width: 620px) {
-  .memory-plugin-panel .mp-app { flex-direction: column; max-height: none; }
+/* ---------------------------------------------------------------- 悬浮按钮 */
+
+.memory-plugin-panel.mp-fab {
+  position: fixed;
+  right: 14px;
+  bottom: 96px;
+  z-index: 30000;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid var(--mp-border);
+  background: var(--mp-accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s;
+}
+.memory-plugin-panel.mp-fab:hover { transform: scale(1.06); }
+.memory-plugin-panel.mp-fab:active { transform: scale(0.96); }
+.memory-plugin-panel .mp-fab-mark { font-size: 1.1em; }
+/* 右下角状态点：未连接红、已连接绿 */
+.memory-plugin-panel.mp-fab::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--mp-bad);
+  border: 2px solid var(--mp-bg);
+}
+.memory-plugin-panel.mp-fab.is-ok::after { background: var(--mp-ok); }
+
+/* ---------------------------------------------------------------- 悬浮弹窗 */
+
+.memory-plugin-panel.mp-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+.memory-plugin-panel .mp-modal-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+.memory-plugin-panel .mp-modal-panel {
+  position: relative;
+  width: min(1120px, 96vw);
+  height: min(780px, 90vh);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--mp-border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--mp-bg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.memory-plugin-panel .mp-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--mp-border);
+  background: var(--mp-panel);
+}
+.memory-plugin-panel .mp-modal-status {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.memory-plugin-panel .mp-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.memory-plugin-panel .mp-icon-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--mp-border);
+  border-radius: 8px;
+  background: var(--mp-card);
+  color: var(--mp-text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+.memory-plugin-panel .mp-icon-btn:hover { background: var(--mp-card-2); }
+.memory-plugin-panel .mp-modal-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+/* 手机：弹窗全屏 + 导航横排 */
+@media (max-width: 720px) {
+  .memory-plugin-panel.mp-modal { padding: 0; }
+  .memory-plugin-panel .mp-modal-panel {
+    width: 100vw;
+    height: 100vh;
+    border-radius: 0;
+    border: 0;
+  }
+  .memory-plugin-panel .mp-modal-body { flex-direction: column; }
   .memory-plugin-panel .mp-nav {
     flex: 0 0 auto;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+    padding: 8px;
     border-right: 0;
     border-bottom: 1px solid var(--mp-border);
+    overflow-y: visible;
   }
-  .memory-plugin-panel .mp-brand { width: 100%; }
-  .memory-plugin-panel .mp-nav-group { width: 100%; margin: 4px 6px 0; }
-  .memory-plugin-panel .mp-nav-item { width: auto; }
+  .memory-plugin-panel .mp-nav-group { display: none; }
+  .memory-plugin-panel .mp-nav-item { width: auto; padding: 4px 10px; }
+  .memory-plugin-panel .mp-brand-text small { display: none; }
+  .memory-plugin-panel.mp-fab { bottom: 84px; right: 12px; }
 }

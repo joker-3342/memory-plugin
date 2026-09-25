@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "memory-plugin",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "homePage": "",
   "description": "为长篇对话提供世界门禁 / 人格锚点 / 因果链 / 关系衰减 / 向量检索。前端只做 UI 与转发，后端做重活。"
 }
