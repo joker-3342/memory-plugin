@@ -1,6 +1,9 @@
 <!-- 因果预览面板：draft / pending 事件图（SPEC 13.4） -->
+
 <div class="mp-row">
-  <button id="mp-refresh-drafts" class="menu_button">刷新因果</button>
+  <button id="mp-refresh-drafts" class="menu_button">刷新</button>
+  <button id="mp-commit-ready" class="menu_button">提交已闭合</button>
+  <span id="mp-draft-count" class="mp-badge pending">—</span>
 </div>
-<div id="mp-causal-list">加载中……</div>
-<noscript>需要开启 JavaScript 才能查看因果草稿。</noscript>
+
+<div id="mp-causal-list" class="mp-list mp-muted">加载中……</div>
