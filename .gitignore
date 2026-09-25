@@ -22,3 +22,6 @@ data/logs/
 *.swp
 .DS_Store
 Thumbs.db
+
+# 预览用的数据快照（临时）
+frontend/snapshot.json

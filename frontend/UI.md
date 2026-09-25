@@ -119,12 +119,27 @@ chat_changed / 场景切换    → onSceneChange() → /world/scene/close + /wor
 
 ## 改完怎么验
 
-```bash
-# 1) 语法（.js 是 ESM，复制成 .mjs 再 check）
-node --check <(cp frontend/views.js /tmp/v.mjs && cat /tmp/v.mjs)
+**最快：用预览页看效果**（不用装酒馆、不用重启、不用开酒馆）
 
-# 2) 渲染（喂真实数据，看有没有 undefined/NaN）
-curl "http://127.0.0.1:8000/ui/snapshot?world_id=你的世界" > /tmp/snapshot.json
+```bash
+cd frontend
+curl "http://127.0.0.1:8080/ui/snapshot?world_id=你的世界" > snapshot.json
+python3 -m http.server 8099
+```
+
+浏览器打开（`view` 可换：`overview` / `summaries` / `characters` / `relations` / `causal` / `world` / `items` / `goals`）：
+
+```
+http://127.0.0.1:8099/preview.html?view=overview
+```
+
+> `preview.html` 只加载 `style.css` + `views.js` + `snapshot.json`，
+> **不依赖酒馆环境**，所以改 `views.js` / `style.css` 后刷新浏览器就能立刻看到效果。
+
+**语法检查**（`.js` 是 ESM，复制成 `.mjs` 再 check）：
+
+```bash
+cp frontend/views.js /tmp/v.mjs && node --check /tmp/v.mjs
 ```
 
 改完刷新酒馆页面即可（`index.js` 是 ES module，会重新加载）。

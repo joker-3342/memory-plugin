@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>记忆引擎 · 界面预览</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { margin: 0; padding: 0; background: #0f0f1e; }
+  /* 预览用：不依赖酒馆环境，直接把弹窗铺满视口 */
+  .memory-plugin-panel.mp-modal { position: fixed; inset: 0; padding: 0; }
+  .memory-plugin-panel .mp-modal-panel {
+    width: 100%; height: 100%; border-radius: 0; border: 0; box-shadow: none;
+  }
+</style>
+</head>
+<body>
+<div id="preview"></div>
+
+<script type="module">
+/**
+ * 界面预览页 —— 不装酒馆也能看界面长什么样。
+ *
+ * 用法：
+ *   1. 把真实的 snapshot 存成同目录的 snapshot.json：
+ *        curl "http://127.0.0.1:8080/ui/snapshot?world_id=你的世界" > snapshot.json
+ *   2. 起个静态服务：python3 -m http.server 8099
+ *   3. 浏览器打开：http://127.0.0.1:8099/preview.html?view=overview
+ *      view 可选：overview / summaries / characters / relations / causal / world / items / goals
+ */
+import * as views from './views.js';
+
+const params = new URLSearchParams(location.search);
+const view = params.get('view') || 'overview';
+
+let snap;
+try {
+  snap = await (await fetch('./snapshot.json')).json();
+} catch (error) {
+  document.getElementById('preview').innerHTML =
+    '<div class="memory-plugin-panel" style="padding:20px"><div class="mp-empty">' +
+    '缺少 snapshot.json —— 先执行：<br><code>curl "http://127.0.0.1:8080/ui/snapshot?world_id=你的世界" &gt; snapshot.json</code>' +
+    '</div></div>';
+  throw error;
+}
+
+const NAV = [
+  ['group', '记忆浏览'],
+  ['overview', '总览'], ['summaries', '剧情摘要'], ['characters', '角色档案'],
+  ['relations', '人际关系'], ['causal', '因果链'],
+  ['group', '世界'],
+  ['world', '世界设定'], ['items', '物品追踪'], ['goals', '目标与伏笔'],
+  ['group', '系统'],
+  ['settings', '设置'], ['debug', '调试'],
+];
+
+const navHtml = NAV.map(([key, label]) =>
+  key === 'group'
+    ? `<div class="mp-nav-group">${label}</div>`
+    : `<button class="mp-nav-item${key === view ? ' active' : ''}" data-view="${key}">${label}</button>`,
+).join('');
+
+function render() {
+  switch (view) {
+    case 'summaries':
+      return views.renderSummaries(snap);
+    case 'characters':
+      return views.renderCharacterList(snap) +
+        views.renderCharacterDetail(snap, snap.characters?.[0]?.id);
+    case 'relations':
+      return views.renderRelations(snap);
+    case 'causal':
+      return views.renderCausal(snap);
+    case 'world':
+      return views.renderWorld(snap);
+    case 'items':
+      return views.renderItems(snap);
+    case 'goals':
+      return views.renderGoals(snap);
+    case 'settings':
+      return '<div class="mp-empty">设置页（静态 DOM，预览页不渲染）</div>';
+    case 'debug':
+      return '<div class="mp-empty">调试页（静态 DOM，预览页不渲染）</div>';
+    case 'overview':
+    default:
+      return views.renderOverview(snap);
+  }
+}
+
+const stats = snap.stats || {};
+
+document.getElementById('preview').innerHTML = `
+  <div class="mp-modal memory-plugin-panel">
+    <div class="mp-modal-panel">
+      <header class="mp-modal-head">
+        <div class="mp-brand">
+          <span class="mp-brand-mark">记</span>
+          <span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span>
+        </div>
+        <div class="mp-modal-status">
+          <span class="mp-dot ok"></span>
+          <span class="mp-status-text">记忆引擎就绪 · v2.3.0 · 待处理 0</span>
+        </div>
+        <div class="mp-modal-actions">
+          <button class="menu_button mp-mini">刷新</button>
+          <button class="mp-icon-btn" title="关闭">✕</button>
+        </div>
+      </header>
+      <div class="mp-modal-body">
+        <nav class="mp-nav">${navHtml}</nav>
+        <div class="mp-main">
+          <div class="mp-content">${render()}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+// 暴露给自动化工具（截图 / 调试用）
+window.__views = views;
+window.__snap = snap;
+window.__previewReady = { view, world: snap.world_id, stats };
+</script>
+</body>
+</html>
