@@ -59,6 +59,19 @@ JSON_FIELDS = {
 }
 
 
+# 自增主键表：这些表允许「不传主键直接插入」（主键由 SQLite 生成）
+AUTOINCREMENT_TABLES = {
+    "events",
+    "causal_edges",
+    "summaries",
+    "drift_log",
+    "causal_drift_log",
+    "conflict_log",
+    "dead_letter",
+    "audit_log",
+}
+
+
 def _prepare(table: str, row: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(row)
     for field in JSON_FIELDS.get(table, ()):
@@ -145,6 +158,19 @@ def upsert_row(table: str, row: Dict[str, Any] = Body(...), operator: str = Quer
     keys = TABLES[table]
     prepared = _prepare(table, row)
     if not all(k in prepared for k in keys):
+        # 自增主键表（events / causal_edges / summaries …）：允许不传主键，直接插入
+        if table in AUTOINCREMENT_TABLES:
+            columns = list(prepared.keys())
+            quoted = [f'"{c}"' for c in columns]
+            placeholders = ",".join("?" for _ in columns)
+            with db.tx():
+                cur = db.connection().execute(
+                    f"INSERT INTO {table} ({','.join(quoted)}) VALUES ({placeholders})",
+                    [prepared[c] for c in columns],
+                )
+                new_id = cur.lastrowid
+            audit.record("admin_insert", table, str(new_id), None, prepared, operator)
+            return {"ok": True, "table": table, "created": True, "id": new_id}
         return {"ok": False, "reason": "missing_primary_key", "required": keys}
 
     where = " AND ".join(f"{k}=?" for k in keys)

@@ -15,6 +15,7 @@ from . import (
     session,
     summarize,
     templates,
+    ui,
     update,
     world,
 )
@@ -34,5 +35,6 @@ api_router.include_router(io.router)
 api_router.include_router(chapters.router)
 api_router.include_router(templates.router)
 api_router.include_router(audit.router)
+api_router.include_router(ui.router)
 
 __all__ = ["api_router"]

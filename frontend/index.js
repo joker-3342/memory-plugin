@@ -1,17 +1,14 @@
 /**
- * 记忆插件 · 前端主入口（SPEC 13.1）。
+ * 记忆插件 · 前端主入口（SPEC 13.1）
  *
- * 事件挂载：
- *   generation_after_commands → 提取锚点 + 同步注入
- *   message_received          → 异步 /update
- *   chat_changed / 场景切换    → /world/scene/close + /world/tick
- *   每 N 轮                    → 强制全量检查
+ * 职责划分（方便你自己改 UI）：
+ *   api.js    —— 通信 + 自动连接（不碰 DOM）
+ *   views.js  —— 数据 → HTML（纯函数，不碰事件）
+ *   index.js  —— 事件挂载 + 导航 + 把两者接起来（本文件）
+ *   ui/*.html —— 骨架；style.css —— 皮肤（改 CSS 变量即可换肤）
  *
- * 自动连接：
- *   启动即探测后端（候选地址列表），成功后写回设置并显示绿点；
- *   「世界 ID」留空时自动取当前角色卡名，一般无需手填。
- *
- * 前端极小：只做 UI 与转发，后端做重活。
+ * 自动连接：启动即并行探测候选地址；失败则后台静默重连（5s→60s 退避），
+ * 用户不需要填地址、也不需要点「重连」。
  */
 
 import {
@@ -21,6 +18,7 @@ import {
   fetchWorldTick,
   fetchSceneClose,
   fetchFullCheck,
+  fetchSnapshot,
   fetchDrafts,
   fetchLastDebug,
   fetchMetrics,
@@ -30,29 +28,31 @@ import {
   fetchTemplates,
   applyTemplate,
   fetchCommit,
-  fetchWorld,
   createWorld,
   testConnection,
   getConnection,
   exportWorld,
-  upsertDraft,
   getSettings,
   DEFAULT_SETTINGS,
 } from './api.js';
 import { extractAnchors, detectSceneChange, setKnownEntities, getKnownEntities } from './anchors.js';
-import { loadLocal, upsertLocalDraft, syncWithBackend, loadSettings, persistSettings } from './storage.js';
+import { loadLocal, syncWithBackend, loadSettings, persistSettings } from './storage.js';
+import * as views from './views.js';
 
 const EXTENSION_NAME = 'memory-plugin';
 const PROMPT_KEY = `${EXTENSION_NAME}-inject`;
 
 let context = null;
-let state = {
+const state = {
   turn: 0,
   scene: null,
   drafts: [],
   lastDebug: null,
   lastInject: null,
   sceneType: 'present',
+  view: 'overview',
+  snapshot: null,
+  selectedChar: null,
 };
 
 function ctx() {
@@ -74,7 +74,7 @@ function chatId() {
   }
 }
 
-/** 世界 ID：优先用户填的；留空则自动取当前角色卡名（再退回会话名）。 */
+/** 世界 ID：优先用户填的；留空则自动取当前角色卡名。 */
 function autoWorldId() {
   try {
     const c = ctx();
@@ -92,18 +92,17 @@ function worldId() {
   return String(extSettings().worldId || '').trim() || autoWorldId();
 }
 
-/** 把解析后的 worldId / chatId 写进运行时设置，供 api.js 使用。 */
 function syncSettings() {
   const s = extSettings();
   configure({ ...s, worldId: worldId(), chatId: chatId() });
   return s;
 }
 
-/** 从最近消息里推断场景（地点 / 在场角色 / 故事时间）。 */
+// --------------------------------------------------------------- 酒馆事件
+
 function inferScene(chat) {
   const last = chat && chat.length ? chat[chat.length - 1] : null;
-  const text = String(last?.mes || '');
-  const anchors = extractAnchors(text);
+  const anchors = extractAnchors(String(last?.mes || ''));
   return {
     loc: state.scene?.loc || anchors[0] || null,
     chars: state.scene?.chars?.length ? state.scene.chars : anchors.slice(0, 3),
@@ -113,8 +112,7 @@ function inferScene(chat) {
 
 function recentSummary() {
   try {
-    const chat = ctx().chat || [];
-    return chat
+    return (ctx().chat || [])
       .slice(-3)
       .map((m) => String(m.mes || '').slice(0, 60))
       .join(' / ');
@@ -123,7 +121,6 @@ function recentSummary() {
   }
 }
 
-/** 注入到提示词（世界门禁永不裁剪）。 */
 function injectIntoPrompt(text) {
   if (!text) return;
   try {
@@ -133,14 +130,11 @@ function injectIntoPrompt(text) {
   }
 }
 
-// --------------------------------------------------------------- 事件流程
-
 async function onMessage(message) {
   syncSettings();
   if (!extSettings().enabled) return;
   const chat = ctx().chat || [];
-  const turn = chat.length;
-  state.turn = turn;
+  state.turn = chat.length;
 
   const anchors = extractAnchors(message);
   const scene = inferScene(chat);
@@ -149,7 +143,7 @@ async function onMessage(message) {
   if (change.changed) await onSceneChange(change.reason);
 
   const result = await fetchInject({
-    turn,
+    turn: state.turn,
     scene: state.scene,
     anchors,
     recentSummary: recentSummary(),
@@ -160,16 +154,11 @@ async function onMessage(message) {
   injectIntoPrompt(result.inject_text);
   renderStatus();
 
-  if (result.degraded) {
-    toast('记忆插件：后端无响应，已降级为常驻核心注入');
-  }
+  if (result.degraded) toast('记忆引擎未就绪，已降级为常驻核心注入');
+  else if (state.view !== 'debug') refreshSnapshot();
 
-  if (turn % Math.max(1, extSettings().fullCheckEvery) === 0) {
-    const check = await fetchFullCheck(worldId(), turn);
-    if (check && check.personality_drift?.length) {
-      toast(`记忆插件：${check.personality_drift.length} 个角色人设出现漂移`);
-    }
-    refreshDrafts();
+  if (state.turn % Math.max(1, extSettings().fullCheckEvery) === 0) {
+    fetchFullCheck(worldId(), state.turn);
   }
 }
 
@@ -193,9 +182,9 @@ async function onAiMessage(message, userMessage) {
   };
 
   // 更新异步：不 await，不阻塞酒馆
-  fetchUpdate(payload).then((response) => {
-    if (response && response.queued) refreshDrafts();
+  fetchUpdate(payload).then(() => {
     renderStatus();
+    setTimeout(() => refreshSnapshot(), 1200); // 等后台任务落库后再刷新界面
   });
 }
 
@@ -205,26 +194,18 @@ async function onSceneChange(reason) {
   const cid = chatId();
   await fetchSceneClose(wid, state.turn);
   await fetchWorldTick({ world_id: wid, meta_time: Math.max(0, state.turn * 10), player_present: true });
-  const drafts = await syncWithBackend(cid, wid, state.drafts);
-  state.drafts = drafts;
-  renderCausalPanel();
+  state.drafts = await syncWithBackend(cid, wid, state.drafts);
+  refreshSnapshot();
   if (reason) console.info('[memory-plugin] 场景切换：', reason);
 }
 
 async function prefetch() {
-  if (!extSettings().preloadOnType || !extSettings().enabled) return;
+  if (!extSettings().enabled) return;
   syncSettings();
-  const wid = worldId();
-  const cid = chatId();
-  const local = loadLocal(cid).drafts;
   try {
-    const response = await fetchDrafts(wid);
-    if (response && response.drafts) {
-      state.drafts = await syncWithBackend(cid, wid, response.drafts);
-      renderCausalPanel();
-    }
+    state.drafts = await syncWithBackend(chatId(), worldId(), loadLocal(chatId()).drafts);
   } catch (error) {
-    state.drafts = local;
+    /* 忽略：界面稍后会刷新 */
   }
 }
 
@@ -240,29 +221,27 @@ function toast(text) {
   }
 }
 
+/** 面向用户的状态文案：只说「就绪/未就绪」，技术细节在「设置 → 高级」。 */
 function renderStatus() {
   const conn = getConnection();
   const dot = document.getElementById('mp-status-dot');
   const text = document.getElementById('mp-status-text');
   const dump = document.getElementById('mp-health-dump');
 
-  if (dot) {
-    const cls = conn.connected ? 'ok' : conn.checkedAt ? 'bad' : '';
-    dot.className = `mp-dot ${cls}`.trim();
-  }
-
+  if (dot) dot.className = `mp-dot ${conn.connected ? 'ok' : conn.checkedAt ? 'bad' : ''}`.trim();
   if (text) {
     if (conn.connected) {
       const h = conn.health || {};
       const q = h.queue || {};
-      text.textContent = `已连接 ${conn.baseUrl} · 后端 v${h.version || '?'} · 向量 ${h.vector || '?'} · 队列 pending=${q.pending ?? 0}/dead=${q.dead ?? 0}`;
+      text.textContent = `记忆引擎就绪 · v${h.version || '?'} · 待处理 ${q.pending ?? 0}${
+        q.dead ? ` · 死信 ${q.dead}` : ''
+      }`;
     } else if (conn.checkedAt) {
-      text.textContent = `未连接后端（已试 ${conn.tried.length} 个地址）。请先启动后端：python -m backend.main`;
+      text.textContent = '记忆引擎未就绪（后台自动重连中…）';
     } else {
-      text.textContent = '尚未探测后端…';
+      text.textContent = '记忆引擎初始化中…';
     }
   }
-
   if (dump) {
     dump.textContent = JSON.stringify(
       { connection: conn, world_id: worldId(), chat_id: chatId(), turn: state.turn },
@@ -272,297 +251,144 @@ function renderStatus() {
   }
 }
 
-/** 重新探测 + 刷新状态；返回结果供按钮提示用。 */
+// 后台静默重连：5s → 60s 指数退避，连上即停
+let reconnectTimer = null;
+let reconnectDelay = 5000;
+let readyNotified = false;
+
+function scheduleReconnect() {
+  if (reconnectTimer || !extSettings().enabled) return;
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (getConnection().connected) return;
+    const result = await testConnection();
+    renderStatus();
+    if (result.ok) {
+      reconnectDelay = 5000;
+      if (!readyNotified) {
+        readyNotified = true;
+        toast('记忆引擎已就绪');
+      }
+      refreshSnapshot();
+      return;
+    }
+    reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), 60000);
+    scheduleReconnect();
+  }, reconnectDelay);
+}
+
+function stopReconnect() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
 async function refreshHealth(silent = false) {
   const result = await testConnection();
   renderStatus();
-  if (!silent) {
-    toast(result.ok ? `记忆插件：已连接 ${result.baseUrl}` : '记忆插件：未找到后端，请确认已启动');
+  if (result.ok) {
+    stopReconnect();
+    if (!silent) toast('记忆引擎已就绪');
+  } else {
+    scheduleReconnect();
+    if (!silent) toast('记忆引擎暂未就绪，会在后台自动重试');
   }
   return result;
 }
 
-// --------------------------------------------------------------- UI
+// --------------------------------------------------------------- 视图渲染
 
-const FALLBACK_HTML = {
-  panel: `
-    <div class="mp-status">
-      <span class="mp-dot" id="mp-status-dot"></span>
-      <span class="mp-status-text" id="mp-status-text">尚未探测后端…</span>
-      <button id="mp-reconnect" class="menu_button mp-mini">重新连接</button>
-    </div>
-    <div class="mp-grid">
-      <label for="mp-base-url">后端地址</label>
-      <input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
-      <label for="mp-world-id">世界 ID</label>
-      <input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
-      <label for="mp-budget">token 预算</label>
-      <input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
-      <label for="mp-inject-timeout">注入超时(ms)</label>
-      <input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
-      <label for="mp-full-check">全量检查间隔</label>
-      <input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
-    </div>
-    <div class="mp-row">
-      <label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label>
-      <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
-      <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试区</label>
-    </div>
-    <div class="mp-row">
-      <button id="mp-save" class="menu_button">保存设置</button>
-      <button id="mp-test" class="menu_button">测试连接</button>
-      <button id="mp-init-world" class="menu_button">初始化世界</button>
-      <button id="mp-template" class="menu_button">应用模板</button>
-      <button id="mp-export" class="menu_button">导出世界</button>
-      <button id="mp-sync-entities" class="menu_button">同步实体表</button>
-    </div>
-    <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>`,
-  causal: `
-    <div class="mp-row">
-      <button id="mp-refresh-drafts" class="menu_button">刷新</button>
-      <button id="mp-commit-ready" class="menu_button">提交已闭合</button>
-      <span id="mp-draft-count" class="mp-badge pending">—</span>
-    </div>
-    <div id="mp-causal-list" class="mp-list mp-muted">加载中……</div>`,
-  debug: `
-    <div class="mp-row">
-      <button id="mp-refresh-debug" class="menu_button">注入详情</button>
-      <button id="mp-refresh-jobs" class="menu_button">队列</button>
-      <button id="mp-refresh-logs" class="menu_button">日志</button>
-      <button id="mp-refresh-errors" class="menu_button">错误日志</button>
-    </div>
-    <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
-    <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
-    <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>`,
-};
+async function refreshSnapshot() {
+  if (!extSettings().enabled) return null;
+  const snap = await fetchSnapshot(worldId());
+  state.snapshot = snap && snap.ok ? snap : null;
+  renderView();
+  return state.snapshot;
+}
 
-/** 优先读 ui/*.html；读不到就用内置兜底（保证任何环境都有界面）。 */
-async function loadTemplate(name, fallbackKey) {
-  try {
-    const url = new URL(`./ui/${name}`, import.meta.url);
-    const response = await fetch(url);
-    if (response.ok) {
-      const text = await response.text();
-      if (text && text.trim()) return text;
-    }
-  } catch (error) {
-    /* 落到兜底 */
+function switchView(name) {
+  state.view = name;
+  document.querySelectorAll('.mp-nav-item').forEach((el) => {
+    el.classList.toggle('active', el.dataset.view === name);
+  });
+  renderView();
+  if (name === 'settings' || name === 'debug') return;
+  if (!state.snapshot) refreshSnapshot();
+}
+
+function renderView() {
+  const host = document.getElementById('mp-content');
+  if (!host) return;
+
+  const settingsView = document.getElementById('mp-view-settings');
+  const debugView = document.getElementById('mp-view-debug');
+  const view = state.view;
+  const isStatic = view === 'settings' || view === 'debug';
+
+  if (settingsView) settingsView.hidden = view !== 'settings';
+  if (debugView) debugView.hidden = view !== 'debug';
+  host.hidden = isStatic;
+  if (isStatic) return;
+
+  const snap = state.snapshot;
+  if (!snap) {
+    host.innerHTML = '<div class="mp-empty">记忆引擎未就绪 —— 后台会自动重连，稍后点「刷新」即可。</div>';
+    return;
   }
-  return FALLBACK_HTML[fallbackKey] || '';
-}
 
-async function mountPanels() {
-  const container = document.getElementById('memory-plugin-settings');
-  if (!container) return;
-
-  const panel = document.getElementById('mp-panel-body');
-  const causal = document.getElementById('mp-causal-body');
-  const debug = document.getElementById('mp-debug-body');
-  const onboard = document.getElementById('mp-onboard-body');
-
-  if (panel) panel.innerHTML = await loadTemplate('panel.html', 'panel');
-  if (causal) causal.innerHTML = await loadTemplate('causal.html', 'causal');
-  if (debug) debug.innerHTML = await loadTemplate('debug.html', 'debug');
-  if (onboard) onboard.innerHTML = await loadTemplate('onboard.html', '');
-
-  bindPanel();
-  bindDebug();
-  applyDebugVisibility();
-  renderStatus();
-  refreshDrafts();
-}
-
-function setValue(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.value = value ?? '';
-}
-
-function setChecked(id, value) {
-  const el = document.getElementById(id);
-  if (el) el.checked = !!value;
-}
-
-function readInt(id, fallback) {
-  const el = document.getElementById(id);
-  const parsed = parseInt(el?.value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function applyDebugVisibility() {
-  const show = extSettings().debugPanel !== false;
-  const debugBody = document.getElementById('mp-debug-body');
-  const debugTitle = document.getElementById('mp-debug-title');
-  if (debugBody) debugBody.style.display = show ? '' : 'none';
-  if (debugTitle) debugTitle.style.display = show ? '' : 'none';
-}
-
-function bindPanel() {
-  const s = extSettings();
-  setValue('mp-base-url', s.baseUrl);
-  setValue('mp-world-id', s.worldId);
-  setValue('mp-budget', s.budget);
-  setValue('mp-inject-timeout', s.injectTimeoutMs);
-  setValue('mp-full-check', s.fullCheckEvery);
-  setChecked('mp-enabled', s.enabled);
-  setChecked('mp-autoconnect', s.autoConnect !== false);
-  setChecked('mp-debug-panel', s.debugPanel !== false);
-
-  document.getElementById('mp-save')?.addEventListener('click', async () => {
-    const next = {
-      ...s,
-      baseUrl: (document.getElementById('mp-base-url')?.value || '').trim(),
-      worldId: (document.getElementById('mp-world-id')?.value || '').trim(),
-      budget: readInt('mp-budget', s.budget),
-      injectTimeoutMs: readInt('mp-inject-timeout', s.injectTimeoutMs),
-      fullCheckEvery: readInt('mp-full-check', s.fullCheckEvery),
-      enabled: !!document.getElementById('mp-enabled')?.checked,
-      autoConnect: !!document.getElementById('mp-autoconnect')?.checked,
-      debugPanel: !!document.getElementById('mp-debug-panel')?.checked,
-    };
-    Object.assign(s, next);
-    syncSettings();
-    persistSettings(s);
-    applyDebugVisibility();
-    if (next.autoConnect) await refreshHealth(true);
-    renderStatus();
-    toast(`记忆插件：已保存（世界 ID = ${worldId()}）`);
-  });
-
-  document.getElementById('mp-reconnect')?.addEventListener('click', () => refreshHealth());
-  document.getElementById('mp-test')?.addEventListener('click', () => refreshHealth());
-
-  document.getElementById('mp-init-world')?.addEventListener('click', async () => {
-    const wid = worldId();
-    const result = await createWorld(wid);
-    if (result && (result.ok || result.id)) {
-      toast(`记忆插件：世界「${wid}」已就绪`);
-    } else {
-      toast('记忆插件：初始化失败，先确认后端在跑');
+  switch (view) {
+    case 'summaries':
+      host.innerHTML = views.renderSummaries(snap);
+      break;
+    case 'characters': {
+      const chars = snap.characters || [];
+      if (chars.length && !chars.some((c) => c.id === state.selectedChar)) state.selectedChar = chars[0].id;
+      host.innerHTML =
+        views.renderCharacterList(snap) +
+        (state.selectedChar ? views.renderCharacterDetail(snap, state.selectedChar) : '');
+      break;
     }
-    renderStatus();
-  });
-
-  document.getElementById('mp-export')?.addEventListener('click', async () => {
-    const data = await exportWorld(worldId());
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${worldId()}-memory-export.json`;
-    link.click();
-  });
-
-  document.getElementById('mp-template')?.addEventListener('click', async () => {
-    const templates = await fetchTemplates();
-    const list = templates?.templates || [];
-    if (!list.length) return toast('记忆插件：模板加载失败');
-    const choice = prompt(
-      `可用模板：\n${list.map((t) => `${t.id}（${t.name || ''}）`).join('\n')}\n\n输入要应用的模板 ID：`,
-      list[0].id,
-    );
-    if (!choice) return;
-    const applied = await applyTemplate(choice, worldId());
-    toast(applied && applied.ok ? `记忆插件：已应用模板 ${choice}` : '记忆插件：模板应用失败');
-  });
-
-  document.getElementById('mp-sync-entities')?.addEventListener('click', async () => {
-    const templates = await fetchTemplates();
-    if (templates && templates.ok) toast('记忆插件：实体表同步完成');
-    else toast('记忆插件：后端未连接');
-  });
+    case 'relations':
+      host.innerHTML = views.renderRelations(snap);
+      break;
+    case 'causal':
+      host.innerHTML = views.renderCausal(snap);
+      break;
+    case 'world':
+      host.innerHTML = views.renderWorld(snap);
+      break;
+    case 'items':
+      host.innerHTML = views.renderItems(snap);
+      break;
+    case 'goals':
+      host.innerHTML = views.renderGoals(snap);
+      break;
+    case 'overview':
+    default:
+      host.innerHTML = views.renderOverview(snap);
+      break;
+  }
+  bindDynamic();
 }
 
-function bindDebug() {
-  document.getElementById('mp-refresh-debug')?.addEventListener('click', refreshDebug);
-  document.getElementById('mp-refresh-drafts')?.addEventListener('click', refreshDrafts);
-  document.getElementById('mp-refresh-jobs')?.addEventListener('click', refreshJobs);
-  document.getElementById('mp-refresh-logs')?.addEventListener('click', () => refreshLogs('main'));
-  document.getElementById('mp-refresh-errors')?.addEventListener('click', () => refreshLogs('errors'));
+/** 动态生成的内容每次重渲染后都要重新绑事件。 */
+function bindDynamic() {
   document.getElementById('mp-commit-ready')?.addEventListener('click', commitReadyDrafts);
+  document.getElementById('mp-refresh-drafts')?.addEventListener('click', () => refreshSnapshot());
+  document.querySelectorAll('#mp-content .mp-item[data-char]').forEach((el) => {
+    el.classList.toggle('selected', el.dataset.char === state.selectedChar);
+    el.addEventListener('click', () => {
+      state.selectedChar = el.dataset.char;
+      renderView();
+    });
+  });
 }
 
-async function refreshDebug() {
-  const target = document.getElementById('mp-debug-dump');
-  const last = await fetchLastDebug();
-  const metrics = await fetchMetrics();
-  state.lastDebug = last;
-  if (target) target.textContent = JSON.stringify({ last, metrics }, null, 2);
-}
-
-async function refreshJobs() {
-  const target = document.getElementById('mp-jobs-dump');
-  const jobs = await fetchJobs();
-  if (target) target.textContent = JSON.stringify(jobs, null, 2);
-}
-
-/** 拉日志：source = main（全量）| errors（只含 ERROR + 堆栈）。 */
-async function refreshLogs(source = 'main') {
-  const target = document.getElementById('mp-log-dump');
-  if (!target) return;
-  target.textContent = '加载中……';
-  const data = source === 'errors' ? await fetchErrorLogs(200) : await fetchLogs(200, 'main');
-  const entries = (data && data.entries) || [];
-  if (!entries.length) {
-    target.textContent = `（${source} 日志为空；路径：${(data && data.path) || '未知'}）`;
-    return;
-  }
-  target.textContent = entries.join('\n');
-  target.scrollTop = target.scrollHeight;
-}
-
-async function refreshDrafts() {
-  const response = await fetchDrafts(worldId());
-  if (response && response.drafts) {
-    state.drafts = response.drafts;
-    renderCausalPanel();
-  }
-}
-
-function renderCausalPanel() {
-  const target = document.getElementById('mp-causal-list');
-  const counter = document.getElementById('mp-draft-count');
-  const drafts = state.drafts || [];
-
-  if (counter) {
-    const openCount = drafts.filter((d) => !d.closed).length;
-    counter.textContent = `未闭合 ${openCount} / 共 ${drafts.length}`;
-    counter.className = `mp-badge ${openCount ? 'draft' : 'committed'}`;
-  }
-
-  if (!target) return;
-  if (!drafts.length) {
-    target.textContent = '当前没有未闭合的因果草稿。';
-    target.classList.add('mp-muted');
-    return;
-  }
-  target.classList.remove('mp-muted');
-
-  target.innerHTML = drafts
-    .map((d) => {
-      const causes = (d.causes || [])
-        .map((c) => `前因：${c.desc || c.event_id || c.content || '—'}`)
-        .join('<br>');
-      const effects = (d.effects || [])
-        .map((c) => `后果：${c.desc || c.event_id || c.content || '—'}`)
-        .join('<br>');
-      const verdict = d.closed
-        ? '<span class="mp-badge committed">可提交</span>'
-        : `<span class="mp-warn">悬空：${(d.blocked || []).join('、') || '等待因果闭合'}</span>`;
-      const meta = [`第${d.turn ?? '?'}楼`, d.loc || '', (d.chars || []).join('、')].filter(Boolean).join(' · ');
-      return `<div class="mp-card ${d.status}">
-          <div class="mp-head"><span class="mp-badge ${d.status}">${d.status}</span><strong>${d.content}</strong></div>
-          <div class="mp-meta">${causes}${causes && effects ? '<br>' : ''}${effects}</div>
-          <div class="mp-meta">${verdict}</div>
-          <div class="mp-meta mp-muted">${meta}</div>
-        </div>`;
-    })
-    .join('');
-}
-
-/** 手动提交「已闭合」的草稿（前端确认 = 人工背书，force 提交）。 */
+/** 手动提交「已闭合」的草稿（前端确认 = 人工背书）。 */
 async function commitReadyDrafts() {
-  const ready = (state.drafts || []).filter((d) => d.closed);
-  if (!ready.length) return toast('记忆插件：没有可提交的草稿（因果未闭合）');
-
+  const ready = ((state.snapshot?.drafts) || []).filter((d) => d.closed);
+  if (!ready.length) return toast('没有可提交的草稿（因果未闭合）');
   let ok = 0;
   for (const d of ready) {
     const result = await fetchCommit({
@@ -584,8 +410,224 @@ async function commitReadyDrafts() {
     });
     if (result && result.ok) ok += 1;
   }
-  toast(`记忆插件：已提交 ${ok}/${ready.length} 条`);
-  refreshDrafts();
+  toast(`已提交 ${ok}/${ready.length} 条`);
+  refreshSnapshot();
+}
+
+// --------------------------------------------------------------- UI 绑定
+
+async function loadTemplate(name) {
+  try {
+    const response = await fetch(new URL(`./ui/${name}`, import.meta.url));
+    if (response.ok) {
+      const text = await response.text();
+      if (text && text.trim()) return text;
+    }
+  } catch (error) {
+    /* 落到兜底 */
+  }
+  return '';
+}
+
+const FALLBACK_HTML = `<div class="mp-app">
+  <nav class="mp-nav">
+    <div class="mp-brand"><span class="mp-brand-mark">记</span><span class="mp-brand-text">记忆引擎<small>Memory Engine</small></span></div>
+    <div class="mp-nav-group">记忆浏览</div>
+    <button class="mp-nav-item" data-view="overview">总览</button>
+    <button class="mp-nav-item" data-view="summaries">剧情摘要</button>
+    <button class="mp-nav-item" data-view="characters">角色档案</button>
+    <button class="mp-nav-item" data-view="relations">人际关系</button>
+    <button class="mp-nav-item" data-view="causal">因果链</button>
+    <div class="mp-nav-group">世界</div>
+    <button class="mp-nav-item" data-view="world">世界设定</button>
+    <button class="mp-nav-item" data-view="items">物品追踪</button>
+    <button class="mp-nav-item" data-view="goals">目标与伏笔</button>
+    <div class="mp-nav-group">系统</div>
+    <button class="mp-nav-item" data-view="settings">设置</button>
+    <button class="mp-nav-item" data-view="debug">调试</button>
+  </nav>
+  <main class="mp-main">
+    <header class="mp-topbar">
+      <span class="mp-dot" id="mp-status-dot"></span>
+      <span class="mp-status-text" id="mp-status-text">记忆引擎初始化中…</span>
+      <button id="mp-refresh" class="menu_button mp-mini">刷新</button>
+    </header>
+    <div class="mp-content" id="mp-content">加载中……</div>
+    <div class="mp-view" id="mp-view-settings" hidden>
+      <div class="mp-grid">
+        <label for="mp-world-id">世界 ID</label><input type="text" id="mp-world-id" class="text_pole" placeholder="留空 = 自动取角色卡名">
+        <label for="mp-budget">token 预算</label><input type="number" id="mp-budget" class="text_pole" min="200" max="4000" step="50">
+      </div>
+      <div class="mp-row"><label class="mp-check"><input type="checkbox" id="mp-enabled"> 启用插件</label></div>
+      <div class="mp-row">
+        <button id="mp-save" class="menu_button">保存</button>
+        <button id="mp-init-world" class="menu_button">初始化世界</button>
+        <button id="mp-template" class="menu_button">应用模板</button>
+        <button id="mp-export" class="menu_button">导出世界</button>
+      </div>
+      <details class="mp-advanced"><summary>高级</summary>
+        <div class="mp-grid">
+          <label for="mp-base-url">后端地址</label><input type="text" id="mp-base-url" class="text_pole" placeholder="留空 = 自动探测（推荐）">
+          <label for="mp-inject-timeout">注入超时(ms)</label><input type="number" id="mp-inject-timeout" class="text_pole" min="100" max="5000" step="50">
+          <label for="mp-full-check">全量检查间隔</label><input type="number" id="mp-full-check" class="text_pole" min="1" max="200" step="1">
+        </div>
+        <div class="mp-row">
+          <label class="mp-check"><input type="checkbox" id="mp-autoconnect"> 自动探测后端</label>
+          <label class="mp-check"><input type="checkbox" id="mp-debug-panel"> 显示调试页</label>
+          <label class="mp-check"><input type="checkbox" id="mp-headless"> 隐藏本面板</label>
+        </div>
+        <div class="mp-row">
+          <button id="mp-reconnect" class="menu_button">重新连接</button>
+          <button id="mp-test" class="menu_button">测试连接</button>
+          <button id="mp-sync-entities" class="menu_button">同步实体表</button>
+        </div>
+        <pre id="mp-health-dump" class="mp-dump mp-health">（未连接后端）</pre>
+      </details>
+    </div>
+    <div class="mp-view" id="mp-view-debug" hidden>
+      <div class="mp-row">
+        <button id="mp-refresh-debug" class="menu_button">注入详情</button>
+        <button id="mp-refresh-jobs" class="menu_button">队列</button>
+        <button id="mp-refresh-logs" class="menu_button">日志</button>
+        <button id="mp-refresh-errors" class="menu_button">错误日志</button>
+      </div>
+      <pre id="mp-debug-dump" class="mp-dump">（尚无注入记录）</pre>
+      <pre id="mp-jobs-dump" class="mp-dump">（尚未拉取队列）</pre>
+      <pre id="mp-log-dump" class="mp-dump">（点「日志」查看最近 200 行）</pre>
+    </div>
+  </main>
+</div>`;
+
+function setValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value ?? '';
+}
+function setChecked(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.checked = !!value;
+}
+function readInt(id, fallback) {
+  const parsed = parseInt(document.getElementById(id)?.value, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function bindPanel() {
+  const s = extSettings();
+  setValue('mp-base-url', s.baseUrl);
+  setValue('mp-world-id', s.worldId);
+  setValue('mp-budget', s.budget);
+  setValue('mp-inject-timeout', s.injectTimeoutMs);
+  setValue('mp-full-check', s.fullCheckEvery);
+  setChecked('mp-enabled', s.enabled);
+  setChecked('mp-autoconnect', s.autoConnect !== false);
+  setChecked('mp-debug-panel', s.debugPanel !== false);
+  setChecked('mp-headless', !!s.headless);
+
+  document.getElementById('mp-refresh')?.addEventListener('click', async () => {
+    await refreshHealth(true);
+    await refreshSnapshot();
+    toast('已刷新');
+  });
+
+  document.getElementById('mp-save')?.addEventListener('click', async () => {
+    const next = {
+      ...s,
+      baseUrl: (document.getElementById('mp-base-url')?.value || '').trim(),
+      worldId: (document.getElementById('mp-world-id')?.value || '').trim(),
+      budget: readInt('mp-budget', s.budget),
+      injectTimeoutMs: readInt('mp-inject-timeout', s.injectTimeoutMs),
+      fullCheckEvery: readInt('mp-full-check', s.fullCheckEvery),
+      enabled: !!document.getElementById('mp-enabled')?.checked,
+      autoConnect: !!document.getElementById('mp-autoconnect')?.checked,
+      debugPanel: !!document.getElementById('mp-debug-panel')?.checked,
+      headless: !!document.getElementById('mp-headless')?.checked,
+    };
+    Object.assign(s, next);
+    syncSettings();
+    persistSettings(s);
+    applyDebugVisibility();
+    if (next.autoConnect) await refreshHealth(true);
+    await refreshSnapshot();
+    renderStatus();
+    toast(`已保存（世界 ID = ${worldId()}）`);
+  });
+
+  document.getElementById('mp-reconnect')?.addEventListener('click', () => refreshHealth());
+  document.getElementById('mp-test')?.addEventListener('click', () => refreshHealth());
+
+  document.getElementById('mp-init-world')?.addEventListener('click', async () => {
+    const wid = worldId();
+    const result = await createWorld(wid);
+    toast(result && (result.ok || result.id) ? `世界「${wid}」已就绪` : '初始化失败，请确认后端在运行');
+    refreshSnapshot();
+  });
+
+  document.getElementById('mp-export')?.addEventListener('click', async () => {
+    const data = await exportWorld(worldId());
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${worldId()}-memory-export.json`;
+    link.click();
+  });
+
+  document.getElementById('mp-template')?.addEventListener('click', async () => {
+    const templates = await fetchTemplates();
+    const list = templates?.templates || [];
+    if (!list.length) return toast('模板加载失败');
+    const choice = prompt(
+      `可用模板：\n${list.map((t) => `${t.id}（${t.name || ''}）`).join('\n')}\n\n输入要应用的模板 ID：`,
+      list[0].id,
+    );
+    if (!choice) return;
+    const applied = await applyTemplate(choice, worldId());
+    toast(applied && applied.ok ? `已应用模板 ${choice}` : '模板应用失败');
+    refreshSnapshot();
+  });
+
+  document.getElementById('mp-sync-entities')?.addEventListener('click', async () => {
+    const templates = await fetchTemplates();
+    toast(templates && templates.ok ? '实体表已同步' : '后端未连接');
+  });
+}
+
+function bindDebug() {
+  document.getElementById('mp-refresh-debug')?.addEventListener('click', refreshDebug);
+  document.getElementById('mp-refresh-jobs')?.addEventListener('click', refreshJobs);
+  document.getElementById('mp-refresh-logs')?.addEventListener('click', () => refreshLogs('main'));
+  document.getElementById('mp-refresh-errors')?.addEventListener('click', () => refreshLogs('errors'));
+}
+
+async function refreshDebug() {
+  const target = document.getElementById('mp-debug-dump');
+  const last = await fetchLastDebug();
+  const metrics = await fetchMetrics();
+  state.lastDebug = last;
+  if (target) target.textContent = JSON.stringify({ last, metrics }, null, 2);
+}
+
+async function refreshJobs() {
+  const target = document.getElementById('mp-jobs-dump');
+  if (target) target.textContent = JSON.stringify(await fetchJobs(), null, 2);
+}
+
+async function refreshLogs(source = 'main') {
+  const target = document.getElementById('mp-log-dump');
+  if (!target) return;
+  target.textContent = '加载中……';
+  const data = source === 'errors' ? await fetchErrorLogs(200) : await fetchLogs(200, 'main');
+  const entries = (data && data.entries) || [];
+  target.textContent = entries.length
+    ? entries.join('\n')
+    : `（${source} 日志为空；路径：${(data && data.path) || '未知'}）`;
+  target.scrollTop = target.scrollHeight;
+}
+
+function applyDebugVisibility() {
+  const show = extSettings().debugPanel !== false;
+  const navItem = document.querySelector('.mp-nav-item[data-view="debug"]');
+  if (navItem) navItem.hidden = !show;
+  if (!show && state.view === 'debug') switchView('overview');
 }
 
 // --------------------------------------------------------------- 初始化
@@ -598,36 +640,43 @@ async function registerSettings() {
     console.warn('[memory-plugin] extension_settings 不可用', error);
   }
 
+  const saved = loadSettings();
+  configure({ ...DEFAULT_SETTINGS, ...extSettings(), ...(saved || {}) });
+  syncSettings();
+
+  // headless：只注入、不显示面板（自己写 UI 时用）
+  if (extSettings().headless) {
+    console.info('[memory-plugin] headless 模式：不渲染面板，仅注入 + 后台同步');
+    return;
+  }
+
   const container = document.createElement('div');
   container.id = 'memory-plugin-settings';
   container.className = 'memory-plugin-panel';
   container.innerHTML = `
     <div class="inline-drawer">
       <div class="inline-drawer-toggle inline-drawer-header">
-        <b>记忆插件 · Memory Engine</b>
+        <b>记忆引擎 · Memory Engine</b>
         <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
       </div>
-      <div class="inline-drawer-content">
-        <div id="mp-panel-body"></div>
-        <hr>
-        <b>因果预览</b>
-        <div id="mp-causal-body"></div>
-        <b id="mp-debug-title">调试</b>
-        <div id="mp-debug-body"></div>
-        <details class="mp-muted">
-          <summary>启动引导</summary>
-          <div id="mp-onboard-body"></div>
-        </details>
-      </div>
+      <div class="inline-drawer-content" id="mp-root"></div>
     </div>`;
 
   const host = document.getElementById('extensions_settings') || document.getElementById('extensions_settings2');
   host?.appendChild(container);
 
-  const saved = loadSettings();
-  configure({ ...DEFAULT_SETTINGS, ...extSettings(), ...(saved || {}) });
-  syncSettings();
-  await mountPanels();
+  const root = document.getElementById('mp-root');
+  const html = (await loadTemplate('panel.html')) || FALLBACK_HTML;
+  root.innerHTML = html;
+
+  document.querySelectorAll('.mp-nav-item').forEach((el) => {
+    el.addEventListener('click', () => switchView(el.dataset.view));
+  });
+  bindPanel();
+  bindDebug();
+  applyDebugVisibility();
+  switchView('overview');
+  renderStatus();
 }
 
 async function bootstrap() {
@@ -636,13 +685,14 @@ async function bootstrap() {
 
   await registerSettings();
 
-  // 自动连接：baseUrl 留空或开启自动探测时，启动即找后端
+  // 自动连接：启动即探测，失败就后台静默重连（用户不用管）
   if (extSettings().autoConnect !== false) {
     const conn = await refreshHealth(true);
-    if (conn.ok) console.info(`[memory-plugin] 已自动连接后端 ${conn.baseUrl}`);
-    else console.warn('[memory-plugin] 未探测到后端，插件将以降级模式运行');
+    console.info(
+      conn.ok ? `[memory-plugin] 已自动连接 ${conn.baseUrl}` : '[memory-plugin] 未探测到后端，转入后台重连',
+    );
   }
-
+  if (!extSettings().headless) await refreshSnapshot();
   await prefetch();
 
   const events = c.eventTypes || c.event_types || {};
@@ -656,13 +706,10 @@ async function bootstrap() {
 
   source.on(events.MESSAGE_RECEIVED || 'message_received', async (messageIndex) => {
     const chat = c.chat || [];
-    const message = chat[messageIndex] || chat[chat.length - 1];
-    await onAiMessage(message);
+    await onAiMessage(chat[messageIndex] || chat[chat.length - 1]);
   });
 
-  source.on(events.MESSAGE_SENT || 'message_sent', () => {
-    prefetch();
-  });
+  source.on(events.MESSAGE_SENT || 'message_sent', () => prefetch());
 
   source.on(events.CHAT_CHANGED || 'chat_changed', async () => {
     syncSettings();
@@ -690,4 +737,6 @@ export {
   setKnownEntities,
   worldId,
   refreshHealth,
+  refreshSnapshot,
+  switchView,
 };

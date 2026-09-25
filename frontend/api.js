@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
   fullCheckEvery: 20,
   preloadOnType: true,
   debugPanel: true,
+  headless: false, // true = 只注入、不渲染面板（自己写 UI 时用）
 };
 
 /** 探测超时：要短，别拖住酒馆启动。 */
@@ -32,9 +33,36 @@ const PROBE_TIMEOUT_MS = 900;
 
 /**
  * 候选端口：8000 是默认，但用户机器上 8000 经常被别的服务占用，
- * 所以再备 8080 / 8001。探测是**并行**的，多几个候选不会变慢。
+ * 所以再备 8080 / 8001 / 5000。探测是**并行**的，多几个候选不会变慢。
  */
-const CANDIDATE_PORTS = [8000, 8080, 8001];
+const CANDIDATE_PORTS = [8000, 8080, 8001, 5000];
+
+/** 上次连上的地址记在这里，下次启动直接用（0 延迟）。 */
+const ENDPOINT_STORAGE_KEY = 'memory_plugin:endpoint';
+
+export function rememberEndpoint(baseUrl) {
+  try {
+    if (baseUrl) localStorage.setItem(ENDPOINT_STORAGE_KEY, baseUrl);
+  } catch (error) {
+    /* localStorage 不可用就算了 */
+  }
+}
+
+export function recallEndpoint() {
+  try {
+    return localStorage.getItem(ENDPOINT_STORAGE_KEY) || '';
+  } catch (error) {
+    return '';
+  }
+}
+
+export function forgetEndpoint() {
+  try {
+    localStorage.removeItem(ENDPOINT_STORAGE_KEY);
+  } catch (error) {
+    /* ignore */
+  }
+}
 
 /**
  * 候选后端地址（按优先级排序）：
@@ -131,8 +159,10 @@ export async function probeBase(baseUrl, timeoutMs = PROBE_TIMEOUT_MS) {
 export async function autoConnect(preferred) {
   const tried = [];
   const ordered = [];
-  const pref = normalize(preferred ?? settings.baseUrl);
-  if (pref) ordered.push(pref);
+  // 优先级：显式传入 > 设置里的地址 > 上次连上的地址（localStorage） > 候选列表
+  [normalize(preferred ?? settings.baseUrl), normalize(recallEndpoint())].forEach((url) => {
+    if (url && !ordered.includes(url)) ordered.push(url);
+  });
   candidateBases().forEach((url) => {
     if (!ordered.includes(url)) ordered.push(url);
   });
@@ -341,6 +371,16 @@ export function upsertDraft(worldId, draft) {
 
 export function setDraftState(draftId, status) {
   return request('/drafts/state', { method: 'POST', body: { draft_id: draftId, status } });
+}
+
+// --------------------------------------------------------------- 界面数据
+
+/**
+ * 记忆快照：一个请求拿全世界的记忆（角色档案 / 关系 / 事件 / 草稿 / 摘要 / 物品 / 伏笔 …）。
+ * 界面渲染全部基于它，见 frontend/UI.md。
+ */
+export function fetchSnapshot(worldId, limit = 100) {
+  return request(`/ui/snapshot?world_id=${encodeURIComponent(worldId)}&limit=${limit}`);
 }
 
 // --------------------------------------------------------------- 调试 / 运维
